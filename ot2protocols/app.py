@@ -10,11 +10,12 @@ import os
 
 from flask import Flask, render_template, Response
 
-from ot2protocols import elisa, labware, calibrate
+from ot2protocols import elisa, labware, calibrate, sanger
 
 
 PROTOCOL_CLASSES = [
     elisa.ElisaProtocol,
+    sanger.SangerProtocol,
 ]
 
 
@@ -30,6 +31,7 @@ def generate_app():
     app.register_blueprint(elisa.bp, url_prefix="/")
     app.register_blueprint(labware.bp, url_prefix="/")
     app.register_blueprint(calibrate.bp, url_prefix="/")
+    app.register_blueprint(sanger.bp, url_prefix="/")
 
     @app.route("/health", methods=['GET'])
     def health():
@@ -45,4 +47,3 @@ def generate_app():
 
 if __name__ == '__main__':
     main()
-

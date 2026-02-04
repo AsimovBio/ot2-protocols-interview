@@ -1,0 +1,66 @@
+"""Serial dilution + NanoDrop preparation for sequencing."""
+
+from opentrons import instruments, labware, robot
+
+parameters = {{ parameter_str }}
+
+{% if robot_config %}
+{% include robot_config %}
+{% endif %}
+
+p300 = ROBOT_CONFIG['pipettes']['P300_Multi']
+# Shared diluent well is used to make each dilution.
+diluent_trough = labware.load('trough-12row', available_slots.pop(), 'Diluent Reservoir')
+diluent_well = diluent_trough.wells(0)
+
+sample_rack = labware.load('tube-rack-48-PCR-cold-block', available_slots.pop(), 'Source Tubes')
+dilution_plate = labware.load('96-flat', available_slots.pop(), 'Sanger Dilutions', share=True)
+
+
+def prepare_column(sample_well, column_wells, factors, final_volume):
+    """Apply a stack of dilutions to the indicated column."""
+    for tier_index, factor in enumerate(factors):
+        dest = column_wells[tier_index]
+        sample_volume = final_volume / factor
+        diluent_volume = max(final_volume - sample_volume, 0)
+        if diluent_volume > 0:
+            p300.transfer(
+                diluent_volume,
+                diluent_well.bottom(),
+                dest.bottom(),
+                new_tip='always',
+            )
+        p300.transfer(
+            sample_volume,
+            sample_well.bottom(),
+            dest.bottom(),
+            new_tip='always',
+            mix_after=(3, min(sample_volume / 2, 20))
+        )
+        robot.comment(f'Row {tier_index + 1} ({dest.row}) calibrated at 1:{factor}')
+
+
+columns = dilution_plate.columns()[:parameters['num_samples']]
+for idx, column in enumerate(columns):
+    sample = sample_rack.wells(idx)
+    prepare_column(
+        sample,
+        column[:len(parameters['dilution_factors'])],
+        parameters['dilution_factors'],
+        parameters['base_volume'],
+    )
+
+robot.comment(
+    'Pause after the dilution series and record the NanoDrop value for the concentration that measures ≥100 ng/µL.'
+)
+robot.pause()
+# After the NanoDrop result is available, write the selected value into {parameters['best_concentration']} ng/µL
+robot.comment(
+    'Selected dilution factor {0} with NanoDrop {1} ng/µL. Transfer 10 µL of that dilution into the output strip.'.format(
+        parameters['best_dilution'],
+        parameters['best_concentration']
+    )
+)
+robot.comment(
+    'Final transfer: {0} µL (target 1000 ng) of the winning dilution per sample.'.format(10)
+)

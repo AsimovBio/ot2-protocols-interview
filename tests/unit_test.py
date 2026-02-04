@@ -1,6 +1,12 @@
 import json
+import os
 import unittest
+from unittest.mock import patch
 
+try:
+    import opentrons  # noqa: F401
+except ImportError:  # pragma: no cover - optional dependency
+    opentrons = None
 
 from ot2protocols import app
 from ot2protocols import utils
@@ -67,11 +73,67 @@ class OT2ProtocolsTestCase(unittest.TestCase):
                                  content_type='application/json')
         self.assertEqual(response.status_code, 500)
 
+    def test_sanger_view(self):
+        response = self.app.get("/protocols/sanger")
+        self.assertEqual(response.status_code, 200)
+
+    def test_sanger_api_order_disabled(self):
+        payload = {
+            "num_samples": 3,
+            "base_volume": 100,
+            "target_concentration": 12,
+            "dilution_factors": "1,2,4,8",
+            "sample_ids": "A,B,C",
+            "pai_sequences": "A:ATCG\nB:GGCC\nC:TTAA",
+            "best_dilution": 1,
+            "best_concentration": 120,
+        }
+        response = self.app.post("api/protocols/sanger",
+                                 data=json.dumps(payload),
+                                 content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.get_data(as_text=True))
+        self.assertIn('protocol_string', data)
+        self.assertEqual(data['order']['status'], 'disabled')
+        self.assertIn('pai_csv', data)
+        self.assertIn('A,ATCG', data['pai_csv'])
+
+    def test_sanger_api_order_submission(self):
+        payload = {
+            "num_samples": 2,
+            "base_volume": 80,
+            "target_concentration": 15,
+            "dilution_factors": "1,2,4,8",
+            "sample_ids": "X,Y",
+            "best_dilution": 2,
+            "best_concentration": 130,
+        }
+        with patch.dict(os.environ, {
+            'GENEWIZ_ENABLED': 'true',
+            'GENEWIZ_API_KEY': 'test-key',
+            'BENCHLING_ENABLED': 'true',
+            'BENCHLING_API_KEY': 'j6da2A0lpn-4wC01bD'
+        }, clear=False):
+            with patch('ot2protocols.sanger.GeneWizClient.place_order') as mock_order, \
+                 patch('ot2protocols.sanger.BenchlingClient.fetch_sequence') as benchling_seq:
+                mock_order.return_value = {'order_id': 'gw-123'}
+                benchling_seq.return_value = 'SEQ123'
+                response = self.app.post("api/protocols/sanger",
+                                         data=json.dumps(payload),
+                                         content_type='application/json')
+                self.assertEqual(response.status_code, 200)
+                data = json.loads(response.get_data(as_text=True))
+                self.assertEqual(data['order']['status'], 'submitted')
+                self.assertEqual(data['order']['response'], {'order_id': 'gw-123'})
+                self.assertIn('SEQ123', data['pai_csv'])
+
     def run_protocol_util(self, protocol_string):
         """
         Install custom labware in test environment and simulate the
         provided protocol string using the opentrons package.
         """
+        if opentrons is None:
+            return
         labware_response = self.app.post("api/protocols/labware",
                                          data="{}",
                                          content_type="application/json")
