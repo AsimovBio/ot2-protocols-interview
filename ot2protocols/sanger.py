@@ -808,7 +808,10 @@ def view():
     form = SangerForm(request.form)
 
     if request.method == 'GET':
-        return _render_form(form)
+        try:
+            return _render_form(form)
+        except Exception as exc:
+            return Response(f"Error rendering form: {str(exc)}", mimetype='text/plain', status=500)
 
     # POST request
     if not form.validate():
@@ -825,6 +828,10 @@ def view():
     except ValueError as exc:
         # Handle errors like missing best_concentration
         form.best_concentration.errors.append(str(exc))
+        return _render_form(form), 400
+    except Exception as exc:
+        # Handle template rendering errors and other unexpected exceptions
+        form.best_concentration.errors.append(f"Protocol generation error: {str(exc)}")
         return _render_form(form), 400
 
     headers = {'Content-disposition': 'attachment; filename=sanger.ot2'}
@@ -863,6 +870,12 @@ def api():
     except ValueError as exc:
         return Response(
             json.dumps({'errors': {'submission': [str(exc)]}}),
+            mimetype='application/json',
+            status=400
+        )
+    except Exception as exc:
+        return Response(
+            json.dumps({'errors': {'submission': [f"Protocol generation error: {str(exc)}"]}}),
             mimetype='application/json',
             status=400
         )

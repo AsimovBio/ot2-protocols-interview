@@ -26,11 +26,21 @@ def view():
     """A simple UI for generating an ELISA protocol."""
     form = ElisaForm(request.form)
     if request.method == "POST" and form.validate():
-        num_samples = form.num_samples.data
-        protocol = ElisaProtocol(num_samples)
-        f = NAME + ".ot2"
-        headers = {"Content-disposition": f"attachment; filename={f}"}
-        return Response(protocol.generate(), mimetype="text", headers=headers)
+        try:
+            num_samples = form.num_samples.data
+            protocol = ElisaProtocol(num_samples)
+            f = NAME + ".ot2"
+            headers = {"Content-disposition": f"attachment; filename={f}"}
+            return Response(protocol.generate(), mimetype="text", headers=headers)
+        except Exception as e:
+            form.errors = {"protocol_generation": [str(e)]}
+            return render_template("html/protocol_generator.html",
+                                   title=ElisaProtocol.title,
+                                   description=ElisaProtocol.description,
+                                   instructions=ElisaProtocol.instructions,
+                                   form_action=NAME,
+                                   input_fields=[form.num_samples],
+                                   errors=form.errors)
     else:
         input_fields = [
             form.num_samples
@@ -53,7 +63,7 @@ def api():
         return jsonify(protocol.to_dict())
     else:
         return Response(json.dumps({"errors": form.errors}),
-                        mimetype="application/json", status=500)
+                        mimetype="application/json", status=400)
 
 
 class ElisaProtocol(protocol.Protocol):

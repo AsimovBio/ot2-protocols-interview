@@ -20,10 +20,19 @@ bp = Blueprint(NAME, __name__)
 def view():
     """A simple UI for downloading the labware creation protocol."""
     if request.method == "POST":
-        protocol = LabwareProtocol()
-        f = NAME + ".ot2"
-        headers = {"Content-disposition": f"attachment; filename={f}"}
-        return Response(protocol.generate(), mimetype="text", headers=headers)
+        try:
+            protocol = LabwareProtocol()
+            f = NAME + ".ot2"
+            headers = {"Content-disposition": f"attachment; filename={f}"}
+            return Response(protocol.generate(), mimetype="text", headers=headers)
+        except Exception as e:
+            return render_template('html/protocol_generator.html',
+                                   title=LabwareProtocol.title,
+                                   description=LabwareProtocol.description,
+                                   instructions=LabwareProtocol.instructions,
+                                   form_action=NAME,
+                                   input_fields=[],
+                                   errors={"protocol": [str(e)]})
     else:
         return render_template('html/protocol_generator.html',
                                title=LabwareProtocol.title,
@@ -36,8 +45,12 @@ def view():
 @bp.route(f"/api/protocols/{NAME}", methods=["POST"])
 def api():
     """An API endpoint for downloading the calibration protocol."""
-    protocol = LabwareProtocol()
-    return jsonify(protocol.to_dict())
+    try:
+        protocol = LabwareProtocol()
+        return jsonify(protocol.to_dict())
+    except Exception as e:
+        return Response(json.dumps({"errors": {"protocol": [str(e)]}}),
+                        mimetype="application/json", status=400)
 
 
 class LabwareProtocol(protocol.Protocol):

@@ -39,11 +39,15 @@ def view():
 @bp.route("/protocols/calibrate", methods=["POST"])
 def form_submission():
     """Form post endpoints for calibration protocols."""
-    protocol = Calibration(request.form["config_name"],
-                           request.form["item_name"])
-    f = protocol.name + ".ot2"
-    headers = {"Content-disposition": f"attachment; filename={f}"}
-    return Response(protocol.generate(), mimetype="text", headers=headers)
+    try:
+        protocol = Calibration(request.form["config_name"],
+                               request.form["item_name"])
+        f = protocol.name + ".ot2"
+        headers = {"Content-disposition": f"attachment; filename={f}"}
+        return Response(protocol.generate(), mimetype="text", headers=headers)
+    except Exception as e:
+        return Response(f"Error generating calibration protocol: {str(e)}",
+                        mimetype="text/plain", status=400)
 
 
 class Calibration(protocol.Protocol):
