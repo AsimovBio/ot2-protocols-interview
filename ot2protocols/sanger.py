@@ -46,9 +46,9 @@ class SangerForm(Form):
         default=100
     )
     target_concentration = DecimalField(
-        'Target concentration for NanoDrop (µM)',
-        [validators.NumberRange(min=0)],
-        default=10
+        'Guidance concentration (µM) — optional until NanoDrop is done',
+        [validators.Optional(), validators.NumberRange(min=0)],
+        default=None
     )
     dilution_factors = StringField(
         'Dilution factors (comma separated)',
@@ -60,14 +60,14 @@ class SangerForm(Form):
         default=''
     )
     best_dilution = DecimalField(
-        'Selected dilution factor',
-        [validators.NumberRange(min=1)],
-        default=1
+        'Selected dilution factor (leave blank until after NanoDrop)',
+        [validators.Optional(), validators.NumberRange(min=1)],
+        default=None
     )
     best_concentration = DecimalField(
-        'NanoDrop concentration (ng/µL) for selected dilution',
-        [validators.NumberRange(min=0)],
-        default=0
+        'NanoDrop concentration (ng/µL) for selected dilution (optional)',
+        [validators.Optional(), validators.NumberRange(min=0)],
+        default=None
     )
 
 
@@ -241,14 +241,14 @@ def _input_fields(form: SangerForm) -> List:
 
 def _build_params(form: SangerForm) -> SangerParams:
     factors = parse_factors(form.dilution_factors.data)
-    best_dilution = float(form.best_dilution.data)
-    best_concentration = float(form.best_concentration.data)
+    best_dilution = float(form.best_dilution.data or factors[0])
+    best_concentration = float(form.best_concentration.data or 0)
     _validate_best_dilution(best_dilution, factors)
     sample_ids = _normalize_sample_ids(form.sample_ids.data, form.num_samples.data)
     return SangerParams(
         num_samples=form.num_samples.data,
         base_volume=float(form.base_volume.data),
-        target_concentration=float(form.target_concentration.data),
+    target_concentration=float(form.target_concentration.data or 0),
         dilution_factors=factors,
         sample_ids=sample_ids,
         best_dilution=best_dilution,
