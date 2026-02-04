@@ -11,12 +11,12 @@ Key classes:
   - SangerForm: WTForms form for parameter input with validation
   - SangerParams: Dataclass holding validated parameters
   - SangerProtocol: Generates OT-2 protocol script
+  - SangerSubmissionBuilder: Orchestrates submission with dependency injection
 
 Key functions:
   - parse_factors: Parse and validate comma-separated dilution factors
   - _normalize_sample_ids: Generate or pad sample ID list with validation
   - build_pai_csv: Generate properly escaped CSV for sequencing order
-  - _maybe_place_order: Attempt GeneWiz order submission with error handling
 
 Environment variables (optional):
   - BENCHLING_ENABLED: 'true' to fetch sequences from Benchling
@@ -42,6 +42,18 @@ NAME = 'sanger'
 FINAL_VOLUME_UL = 10
 TARGET_MASS_NG = 1000
 bp = Blueprint(NAME, __name__)
+
+
+def _is_feature_enabled(env_var: str) -> bool:
+    """Check if a feature is enabled via environment variable.
+
+    Args:
+        env_var: Environment variable name to check
+
+    Returns:
+        True if env var is set to '1', 'true', or 'yes' (case-insensitive)
+    """
+    return os.environ.get(env_var, 'false').lower() in ('1', 'true', 'yes')
 
 
 @dataclass
@@ -260,8 +272,7 @@ class SangerSubmissionBuilder:
         if self._benchling_client is not None:
             return self._benchling_client
 
-        enabled = os.environ.get('BENCHLING_ENABLED', 'false').lower() in ('1', 'true', 'yes')
-        if not enabled:
+        if not _is_feature_enabled('BENCHLING_ENABLED'):
             return None
 
         try:
@@ -278,8 +289,7 @@ class SangerSubmissionBuilder:
         if self._genewiz_client is not None:
             return self._genewiz_client
 
-        enabled = os.environ.get('GENEWIZ_ENABLED', 'false').lower() in ('1', 'true', 'yes')
-        if not enabled:
+        if not _is_feature_enabled('GENEWIZ_ENABLED'):
             return None
 
         try:
@@ -526,61 +536,6 @@ def parse_pai_sequences(raw: str) -> Dict[str, str]:
     return entries
 
 
-def _benchling_sequences(sample_ids: Sequence[str]) -> Dict[str, str]:
-    """Fetch sequences from Benchling if enabled.
-
-    Returns empty dict if disabled or any error occurs. This ensures protocol
-    generation never fails due to Benchling issues (Benchling is optional).
-
-    Args:
-        sample_ids: Sample names to look up
-
-    Returns:
-        Dict of sample name -> sequence (empty dict on any error or if disabled)
-    """
-    enabled = os.environ.get('BENCHLING_ENABLED', 'false').lower() in ('1', 'true', 'yes')
-    if not enabled:
-        return {}
-
-    try:
-        client = BenchlingClient()
-    except BenchlingError:
-        # Benchling unavailable - silently return empty dict
-        return {}
-
-    sequences: Dict[str, str] = {}
-    for sample in sample_ids:
-        try:
-            seq = client.fetch_sequence(sample)
-            if seq:
-                sequences[sample] = seq
-        except BenchlingError:
-            # Skip this sample if lookup fails
-            continue
-
-    return sequences
-
-
-def build_pai_map(params: SangerParams) -> Dict[str, str]:
-    """Build sample -> sequence mapping from manual and Benchling sources.
-
-    Manual sequences take precedence over Benchling lookups.
-
-    Args:
-        params: Protocol parameters with sample IDs and manual sequences
-
-    Returns:
-        Dict mapping each sample to its sequence (empty string if not found)
-    """
-    manual = parse_pai_sequences(params.pai_text)
-    bench_data = _benchling_sequences(params.selected_samples)
-    result: Dict[str, str] = {}
-    for sample in params.selected_samples:
-        sequence = manual.get(sample) or bench_data.get(sample, '')
-        result[sample] = sequence
-    return result
-
-
 def build_pai_csv(params: SangerParams, sequence_map: Dict[str, str]) -> str:
     """Generate properly escaped CSV output from protocol parameters.
 
@@ -666,50 +621,6 @@ def build_order_payload(
         'final_volume_ul': FINAL_VOLUME_UL,
         'final_mass_ng': TARGET_MASS_NG,
     }
-
-
-def _maybe_place_order(payload: Dict[str, object]) -> Dict[str, object]:
-    """Attempt to place order with GeneWiz if enabled.
-
-    Returns structured response indicating:
-    - 'disabled': Feature not enabled
-    - 'submitted': Order successfully placed
-    - 'failed': Service was down or rejected request
-
-    Always returns structured response - never raises exception.
-
-    Args:
-        payload: Order payload to submit
-
-    Returns:
-        Dict with 'status' key and appropriate details
-    """
-    enabled = os.environ.get('GENEWIZ_ENABLED', 'false').lower() in ('1', 'true', 'yes')
-    if not enabled:
-        return {'status': 'disabled', 'message': 'GeneWiz ordering not enabled'}
-
-    try:
-        client = GeneWizClient()
-    except GeneWizError as exc:
-        return {
-            'status': 'failed',
-            'error': 'GeneWiz service unavailable',
-            'details': str(exc)
-        }
-
-    try:
-        response = client.place_order(payload)
-        return {
-            'status': 'submitted',
-            'response': response,
-            'timestamp': datetime.now().isoformat()
-        }
-    except GeneWizError as exc:
-        return {
-            'status': 'failed',
-            'error': f'Order submission failed: {str(exc)}',
-            'type': 'genewiz_error'
-        }
 
 
 def _input_fields(form: SangerForm) -> List:

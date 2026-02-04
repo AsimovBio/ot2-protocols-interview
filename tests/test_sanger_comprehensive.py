@@ -17,9 +17,7 @@ from ot2protocols.sanger import (
     _validate_best_dilution,
     parse_pai_sequences,
     build_pai_csv,
-    build_pai_map,
     _build_params,
-    _maybe_place_order,
 )
 from ot2protocols.integrations import BenchlingError, GeneWizError
 
@@ -397,39 +395,52 @@ class TestSangerSubmissionBuilder(unittest.TestCase):
         self.assertEqual(seq_map['B'], 'BENCHLING_B')
 
 
-class TestMaybePlaceOrder(unittest.TestCase):
-    """Test order submission."""
+class TestOrderSubmission(unittest.TestCase):
+    """Test order submission via SangerSubmissionBuilder."""
 
-    def test_order_disabled_when_env_not_set(self):
-        """Return disabled status when GENEWIZ_ENABLED not set."""
-        with patch.dict('os.environ', {'GENEWIZ_ENABLED': 'false'}):
-            result = _maybe_place_order({})
+    def _make_params(self):
+        """Create minimal params for testing."""
+        return SangerParams(
+            num_samples=1,
+            base_volume=100,
+            dilution_factors=[1.0, 2.0, 4.0, 8.0],
+            sample_ids=['Sample1'],
+            best_dilution=None,
+            best_concentration=None,
+            pai_text='',
+        )
+
+    def test_order_disabled_when_no_client(self):
+        """Return disabled status when no GeneWiz client."""
+        params = self._make_params()
+        builder = SangerSubmissionBuilder(params, genewiz_client=None)
+        result = builder._submit_order(None, {})
         self.assertEqual(result['status'], 'disabled')
 
     def test_order_submission_success(self):
         """Successful order submission."""
+        params = self._make_params()
         payload = {'service': 'Sanger Sequencing'}
 
         mock_client = Mock()
         mock_client.place_order.return_value = {'order_id': 'GW-12345'}
 
-        with patch('ot2protocols.sanger.GeneWizClient', return_value=mock_client):
-            with patch.dict('os.environ', {'GENEWIZ_ENABLED': 'true'}):
-                result = _maybe_place_order(payload)
+        builder = SangerSubmissionBuilder(params, genewiz_client=mock_client)
+        result = builder._submit_order(mock_client, payload)
 
         self.assertEqual(result['status'], 'submitted')
         self.assertEqual(result['response']['order_id'], 'GW-12345')
 
     def test_order_submission_failure(self):
         """Handle order submission failure."""
+        params = self._make_params()
         payload = {'service': 'Sanger Sequencing'}
 
         mock_client = Mock()
         mock_client.place_order.side_effect = GeneWizError('API Error')
 
-        with patch('ot2protocols.sanger.GeneWizClient', return_value=mock_client):
-            with patch.dict('os.environ', {'GENEWIZ_ENABLED': 'true'}):
-                result = _maybe_place_order(payload)
+        builder = SangerSubmissionBuilder(params, genewiz_client=mock_client)
+        result = builder._submit_order(mock_client, payload)
 
         self.assertEqual(result['status'], 'failed')
         self.assertIn('error', result)
