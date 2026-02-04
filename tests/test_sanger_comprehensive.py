@@ -14,7 +14,6 @@ from ot2protocols.sanger import (
     SangerSubmissionBuilder,
     parse_factors,
     _normalize_sample_ids,
-    _validate_best_dilution,
     parse_pai_sequences,
     build_pai_csv,
     _build_params,
@@ -122,17 +121,25 @@ class TestNormalizeSampleIds(unittest.TestCase):
 
 
 class TestValidateBestDilution(unittest.TestCase):
-    """Test best dilution validation."""
+    """Test best dilution validation (via SangerProtocol)."""
 
     def test_valid_dilution(self):
         """Accept dilution that exists in factors."""
-        _validate_best_dilution(2.0, [1.0, 2.0, 4.0, 8.0])  # No exception
+        params = SangerParams(
+            num_samples=1, base_volume=100, dilution_factors=[1.0, 2.0, 4.0, 8.0],
+            sample_ids=['A'], best_dilution=2.0, best_concentration=100.0, pai_text=''
+        )
+        SangerProtocol(params)  # Should not raise
 
     def test_invalid_dilution(self):
         """Reject dilution not in factors."""
+        params = SangerParams(
+            num_samples=1, base_volume=100, dilution_factors=[1.0, 2.0, 4.0, 8.0],
+            sample_ids=['A'], best_dilution=3.0, best_concentration=100.0, pai_text=''
+        )
         with self.assertRaises(ValueError) as ctx:
-            _validate_best_dilution(3.0, [1.0, 2.0, 4.0, 8.0])
-        self.assertIn('must be one of', str(ctx.exception).lower())
+            SangerProtocol(params)
+        self.assertIn('not in factors', str(ctx.exception).lower())
 
 
 class TestParsePaiSequences(unittest.TestCase):
@@ -414,7 +421,7 @@ class TestOrderSubmission(unittest.TestCase):
         """Return disabled status when no GeneWiz client."""
         params = self._make_params()
         builder = SangerSubmissionBuilder(params, genewiz_client=None)
-        result = builder._submit_order(None, {})
+        result = builder._submit_order({})
         self.assertEqual(result['status'], 'disabled')
 
     def test_order_submission_success(self):
@@ -426,7 +433,7 @@ class TestOrderSubmission(unittest.TestCase):
         mock_client.place_order.return_value = {'order_id': 'GW-12345'}
 
         builder = SangerSubmissionBuilder(params, genewiz_client=mock_client)
-        result = builder._submit_order(mock_client, payload)
+        result = builder._submit_order(payload)
 
         self.assertEqual(result['status'], 'submitted')
         self.assertEqual(result['response']['order_id'], 'GW-12345')
@@ -440,7 +447,7 @@ class TestOrderSubmission(unittest.TestCase):
         mock_client.place_order.side_effect = GeneWizError('API Error')
 
         builder = SangerSubmissionBuilder(params, genewiz_client=mock_client)
-        result = builder._submit_order(mock_client, payload)
+        result = builder._submit_order(payload)
 
         self.assertEqual(result['status'], 'failed')
         self.assertIn('error', result)
