@@ -1,8 +1,9 @@
-"""Sanger sequencing protocol generation + GeneWiz ordering."""
+"""Sanger sequencing workflow + external integrations."""
 
 import json
 import os
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Dict, List, Sequence
 
 from flask import Blueprint, Response, jsonify, render_template, request
 from wtforms import Form, DecimalField, IntegerField, StringField, validators
@@ -11,11 +12,26 @@ from werkzeug.datastructures import MultiDict
 from ot2protocols import protocol, utils
 from ot2protocols.integrations import BenchlingClient, BenchlingError, GeneWizClient, GeneWizError
 
+NAME = 'sanger'
 FINAL_VOLUME_UL = 10
 TARGET_MASS_NG = 1000
-
-NAME = 'sanger'
 bp = Blueprint(NAME, __name__)
+
+
+@dataclass
+class SangerParams:
+    num_samples: int
+    base_volume: float
+    target_concentration: float
+    dilution_factors: List[float]
+    sample_ids: List[str]
+    best_dilution: float
+    best_concentration: float
+    pai_text: str
+
+    @property
+    def selected_samples(self) -> List[str]:
+        return self.sample_ids[:self.num_samples]
 
 
 class SangerForm(Form):
@@ -44,7 +60,7 @@ class SangerForm(Form):
         default=''
     )
     best_dilution = DecimalField(
-        'Selected dilution factor (1/2/4/8)',
+        'Selected dilution factor',
         [validators.NumberRange(min=1)],
         default=1
     )
@@ -53,10 +69,6 @@ class SangerForm(Form):
         [validators.NumberRange(min=0)],
         default=0
     )
-    pai_sequences = StringField(
-        'PAI sequences (Sample:Sequence per line)',
-        default=''
-    )
 
 
 class SangerProtocol(protocol.Protocol):
@@ -64,38 +76,21 @@ class SangerProtocol(protocol.Protocol):
     title = 'Sanger Sequencing Prep'
     description = 'Generate serial dilutions and NanoDrop prep for Sanger requests.'
     instructions = (
-        'This workflow produces four dilution tiers per sample, records NanoDrop targets, '
-        'and optionally prepares a GeneWiz order payload.'
+        'Generate four dilution tiers per sample, pause for NanoDrop, then transfer the winning dilution into final tubes.'
     )
 
-    def __init__(
-        self,
-        num_samples: int,
-        base_volume: float,
-        target_concentration: float,
-        dilution_factors: List[float],
-        sample_ids: List[str],
-        best_dilution: float,
-        best_concentration: float,
-    ):
-        # Persist user selections so the template can access them.
-        self.num_samples = num_samples
-        self.base_volume = base_volume
-        self.target_concentration = target_concentration
-        self.dilution_factors = dilution_factors
-        self.sample_ids = sample_ids
-        self.best_dilution = best_dilution
-        self.best_concentration = best_concentration
+    def __init__(self, params: SangerParams):
+        self.params = params
 
     def generate(self) -> str:
         parameters = {
-            'num_samples': self.num_samples,
-            'base_volume': self.base_volume,
-            'target_concentration': self.target_concentration,
-            'dilution_factors': self.dilution_factors,
-            'sample_ids': self.sample_ids,
-            'best_dilution': self.best_dilution,
-            'best_concentration': self.best_concentration,
+            'num_samples': self.params.num_samples,
+            'base_volume': self.params.base_volume,
+            'target_concentration': self.params.target_concentration,
+            'dilution_factors': self.params.dilution_factors,
+            'sample_ids': self.params.selected_samples,
+            'best_dilution': self.params.best_dilution,
+            'best_concentration': self.params.best_concentration,
         }
         return utils.protocol_from_template(
             parameters,
@@ -105,18 +100,17 @@ class SangerProtocol(protocol.Protocol):
 
     def to_dict(self) -> Dict[str, object]:
         return {
-            'num_samples': self.num_samples,
-            'base_volume': self.base_volume,
-            'target_concentration': self.target_concentration,
-            'dilution_factors': self.dilution_factors,
-            'sample_ids': self.sample_ids,
-            'best_dilution': self.best_dilution,
-            'best_concentration': self.best_concentration,
+            'num_samples': self.params.num_samples,
+            'base_volume': self.params.base_volume,
+            'target_concentration': self.params.target_concentration,
+            'dilution_factors': self.params.dilution_factors,
+            'sample_ids': self.params.selected_samples,
+            'best_dilution': self.params.best_dilution,
+            'best_concentration': self.params.best_concentration,
         }
 
 
 def parse_factors(raw: str) -> List[float]:
-    """Sanitize the comma-separated dilution factors from the form."""
     tokens = [token.strip() for token in raw.split(',') if token.strip()]
     if len(tokens) < 4:
         raise ValueError('Provide at least four dilution factors (e.g. 1,2,4,8).')
@@ -132,20 +126,29 @@ def parse_factors(raw: str) -> List[float]:
     return values
 
 
+def _normalize_sample_ids(raw: str, min_count: int) -> List[str]:
+    ids = [sid.strip() for sid in raw.split(',') if sid.strip()]
+    while len(ids) < min_count:
+        ids.append(f'Sample{len(ids) + 1}')
+    return ids
+
+
+def _validate_best_dilution(best: float, factors: Sequence[float]) -> None:
+    if best not in factors:
+        raise ValueError('Selected dilution must be one of the provided factors.')
+
+
 def parse_pai_sequences(raw: str) -> Dict[str, str]:
-    """Convert the user-provided PAI lines into a sample -> sequence map."""
     entries = {}
     for line in raw.splitlines():
-        if not line.strip():
-            continue
-        if ':' not in line:
+        if not line.strip() or ':' not in line:
             continue
         sample, sequence = line.split(':', 1)
         entries[sample.strip()] = sequence.strip()
     return entries
 
 
-def _benchling_sequences(sample_ids: List[str]) -> Dict[str, str]:
+def _benchling_sequences(sample_ids: Sequence[str]) -> Dict[str, str]:
     enabled = os.environ.get('BENCHLING_ENABLED', 'false').lower() in ('1', 'true', 'yes')
     if not enabled:
         return {}
@@ -153,7 +156,7 @@ def _benchling_sequences(sample_ids: List[str]) -> Dict[str, str]:
         client = BenchlingClient()
     except BenchlingError:
         return {}
-    sequences = {}
+    sequences: Dict[str, str] = {}
     for sample in sample_ids:
         try:
             seq = client.fetch_sequence(sample)
@@ -164,52 +167,50 @@ def _benchling_sequences(sample_ids: List[str]) -> Dict[str, str]:
     return sequences
 
 
-def build_pai_map(sample_ids: List[str], raw: str) -> Dict[str, str]:
-    parsed = parse_pai_sequences(raw)
-    benchling_data = _benchling_sequences(sample_ids)
-    for sample in sample_ids:
-        if sample not in parsed or not parsed[sample]:
-            parsed[sample] = benchling_data.get(sample, parsed.get(sample, ''))
-        parsed.setdefault(sample, parsed.get(sample, ''))
-    return parsed
+def build_pai_map(params: SangerParams) -> Dict[str, str]:
+    manual = parse_pai_sequences(params.pai_text)
+    bench_data = _benchling_sequences(params.selected_samples)
+    result: Dict[str, str] = {}
+    for sample in params.selected_samples:
+        sequence = manual.get(sample) or bench_data.get(sample, '')
+        result[sample] = sequence
+    return result
 
 
-def build_pai_csv(
-    sample_ids: List[str],
-    sequence_map: Dict[str, str],
-    best_dilution: float,
-    best_concentration: float,
-) -> str:
-    """Render the per-sample PAI map as a comma-separated file."""
-    final_mass = best_concentration * FINAL_VOLUME_UL
-    lines = [
-        'Sample,Sequence,Best Dilution,Selected Concentration (ng/µL),Final Volume (µL),Final Mass (ng)'
-    ]
-    for sample in sample_ids:
+def build_pai_csv(params: SangerParams, sequence_map: Dict[str, str]) -> str:
+    final_mass = params.best_concentration * FINAL_VOLUME_UL
+    header = 'Sample,Sequence,Best Dilution,Selected Concentration (ng/µL),Final Volume (µL),Final Mass (ng)'
+    lines = [header]
+    for sample in params.selected_samples:
         sequence = sequence_map.get(sample, '')
         lines.append(
-            f'{sample},{sequence},{best_dilution},{best_concentration},{FINAL_VOLUME_UL},{final_mass}'
+            f'{sample},{sequence},{params.best_dilution},{params.best_concentration},{FINAL_VOLUME_UL},{final_mass}'
         )
     return '\n'.join(lines)
 
 
-def build_order_payload(protocol_dict: Dict[str, object]) -> Dict[str, object]:
-    # Build a lightweight representation of the GeneWiz order so the UI can show status.
+def build_order_payload(
+    params: SangerParams,
+    sequence_map: Dict[str, str],
+    pai_csv: str,
+) -> Dict[str, object]:
     return {
         'service': 'Sanger Sequencing',
         'samples': [
             {
                 'name': sample,
-                'dilution_factors': protocol_dict['dilution_factors'],
-                'target_concentration': protocol_dict['target_concentration'],
-                'pai_sequence': protocol_dict['pai_sequences'].get(sample, ''),
+                'dilution_factors': params.dilution_factors,
+                'target_concentration': params.target_concentration,
+                'pai_sequence': sequence_map.get(sample, ''),
             }
-            for sample in protocol_dict['sample_ids']
+            for sample in params.selected_samples
         ],
-        'instructions': f"{len(protocol_dict['sample_ids'])} samples prepared at {protocol_dict['target_concentration']} µM",
-        'pai_csv': protocol_dict['pai_csv'],
-        'best_dilution': protocol_dict['best_dilution'],
-        'best_concentration': protocol_dict['best_concentration'],
+        'instructions': f"{len(params.selected_samples)} samples prepared at {params.best_concentration} ng/µL",
+        'pai_csv': pai_csv,
+        'best_dilution': params.best_dilution,
+        'best_concentration': params.best_concentration,
+        'final_volume_ul': FINAL_VOLUME_UL,
+        'final_mass_ng': TARGET_MASS_NG,
     }
 
 
@@ -217,7 +218,6 @@ def _maybe_place_order(payload: Dict[str, object]) -> Dict[str, object]:
     enabled = os.environ.get('GENEWIZ_ENABLED', 'false').lower() in ('1', 'true', 'yes')
     if not enabled:
         return {'status': 'disabled'}
-    # Contact GeneWiz only when the feature flag and API key are configured.
     try:
         client = GeneWizClient()
         response = client.place_order(payload)
@@ -226,47 +226,8 @@ def _maybe_place_order(payload: Dict[str, object]) -> Dict[str, object]:
         return {'status': 'failed', 'error': str(exc)}
 
 
-@bp.route(f'/protocols/{NAME}', methods=['GET', 'POST'])
-def view():
-    """Render the web form for generating the Sanger sequencing protocol."""
-    form = SangerForm(request.form)
-    if request.method == 'POST' and form.validate():
-        try:
-            dilution_factors = parse_factors(form.dilution_factors.data)
-        except ValueError as exc:
-            form.dilution_factors.errors.append(str(exc))
-            input_fields = [
-                form.num_samples,
-                form.base_volume,
-                form.target_concentration,
-                form.dilution_factors,
-                form.sample_ids,
-                form.pai_sequences,
-                form.best_dilution,
-                form.best_concentration,
-            ]
-            return render_template('html/protocol_generator.html',
-                                   title=SangerProtocol.title,
-                                   description=SangerProtocol.description,
-                                   instructions=SangerProtocol.instructions,
-                                   form_action=NAME,
-                                   input_fields=input_fields)
-        sample_ids = [sid.strip() for sid in form.sample_ids.data.split(',') if sid.strip()]
-        if len(sample_ids) < form.num_samples.data:
-            # Provide placeholder sample names when the user leaves the field blank.
-            sample_ids = [f'Sample{i + 1}' for i in range(form.num_samples.data)]
-        protocol = SangerProtocol(
-            num_samples=form.num_samples.data,
-            base_volume=float(form.base_volume.data),
-            target_concentration=float(form.target_concentration.data),
-            dilution_factors=dilution_factors,
-            sample_ids=sample_ids[:form.num_samples.data],
-            best_dilution=float(form.best_dilution.data),
-            best_concentration=float(form.best_concentration.data),
-        )
-        headers = {'Content-disposition': 'attachment; filename=sanger.ot2'}
-        return Response(protocol.generate(), mimetype='text', headers=headers)
-    input_fields = [
+def _input_fields(form: SangerForm) -> List:
+    return [
         form.num_samples,
         form.base_volume,
         form.target_concentration,
@@ -276,54 +237,75 @@ def view():
         form.best_dilution,
         form.best_concentration,
     ]
-    return render_template('html/protocol_generator.html',
-                           title=SangerProtocol.title,
-                           description=SangerProtocol.description,
-                           instructions=SangerProtocol.instructions,
-                           form_action=NAME,
-                           input_fields=input_fields)
+
+
+def _build_params(form: SangerForm) -> SangerParams:
+    factors = parse_factors(form.dilution_factors.data)
+    best_dilution = float(form.best_dilution.data)
+    best_concentration = float(form.best_concentration.data)
+    _validate_best_dilution(best_dilution, factors)
+    sample_ids = _normalize_sample_ids(form.sample_ids.data, form.num_samples.data)
+    return SangerParams(
+        num_samples=form.num_samples.data,
+        base_volume=float(form.base_volume.data),
+        target_concentration=float(form.target_concentration.data),
+        dilution_factors=factors,
+        sample_ids=sample_ids,
+        best_dilution=best_dilution,
+        best_concentration=best_concentration,
+        pai_text=form.pai_sequences.data,
+    )
+
+
+def _prepare_submission(params: SangerParams):
+    sequence_map = build_pai_map(params)
+    pai_csv = build_pai_csv(params, sequence_map)
+    protocol = SangerProtocol(params)
+    payload = build_order_payload(params, sequence_map, pai_csv)
+    order_status = _maybe_place_order(payload)
+    return protocol.generate(), pai_csv, order_status
+
+
+def _render_form(form: SangerForm):
+    return render_template(
+        'html/protocol_generator.html',
+        title=SangerProtocol.title,
+        description=SangerProtocol.description,
+        instructions=SangerProtocol.instructions,
+        form_action=NAME,
+        input_fields=_input_fields(form),
+    )
+
+
+@bp.route(f'/protocols/{NAME}', methods=['GET', 'POST'])
+def view():
+    form = SangerForm(request.form)
+    if request.method == 'POST' and form.validate():
+        try:
+            params = _build_params(form)
+        except ValueError as exc:
+            form.best_dilution.errors.append(str(exc))
+            return _render_form(form)
+        script, _, _ = _prepare_submission(params)
+        headers = {'Content-disposition': 'attachment; filename=sanger.ot2'}
+        return Response(script, mimetype='text', headers=headers)
+    return _render_form(form)
 
 
 @bp.route(f'/api/protocols/{NAME}', methods=['POST'])
 def api():
-    """Return the generated protocol & order metadata for downstream automation."""
     form = SangerForm(MultiDict(mapping=request.json))
     if not form.validate():
         return Response(json.dumps({'errors': form.errors}), mimetype='application/json', status=500)
     try:
-        dilution_factors = parse_factors(form.dilution_factors.data)
+        params = _build_params(form)
     except ValueError as exc:
-        return Response(json.dumps({'errors': {'dilution_factors': [str(exc)]}}), mimetype='application/json', status=500)
-
-    sample_ids = [sid.strip() for sid in form.sample_ids.data.split(',') if sid.strip()]
-    if len(sample_ids) < form.num_samples.data:
-        # Mirror the same fallback logic for API callers.
-        sample_ids = [f'Sample{i + 1}' for i in range(form.num_samples.data)]
-    selected_samples = sample_ids[:form.num_samples.data]
-    protocol = SangerProtocol(
-        num_samples=form.num_samples.data,
-        base_volume=float(form.base_volume.data),
-        target_concentration=float(form.target_concentration.data),
-        dilution_factors=dilution_factors,
-        sample_ids=selected_samples,
-        best_dilution=float(form.best_dilution.data),
-        best_concentration=float(form.best_concentration.data),
-    )
-    protocol_dict = protocol.to_dict()
-    sequence_map = build_pai_map(selected_samples, form.pai_sequences.data)
-    pai_csv = build_pai_csv(
-        selected_samples,
-        sequence_map,
-        float(form.best_dilution.data),
-        float(form.best_concentration.data),
-    )
-    protocol_dict['pai_sequences'] = sequence_map
-    protocol_dict['pai_csv'] = pai_csv
-    payload = build_order_payload(protocol_dict)
-    order_status = _maybe_place_order(payload)
-    response = {
-        'protocol_string': protocol.generate(),
+        return Response(json.dumps({'errors': {'best_dilution': [str(exc)]}}), mimetype='application/json', status=500)
+    protocol_str, pai_csv, order_status = _prepare_submission(params)
+    return jsonify({
+        'protocol_string': protocol_str,
         'order': order_status,
         'pai_csv': pai_csv,
-    }
-    return jsonify(response)
+        'best_dilution': params.best_dilution,
+        'best_concentration': params.best_concentration,
+    })
