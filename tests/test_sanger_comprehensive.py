@@ -215,7 +215,7 @@ class TestBuildPaiCsv(unittest.TestCase):
         params = SangerParams(
             num_samples=1,
             base_volume=100,
-            dilution_factors=[1.0, 2.0],
+            dilution_factors=[1.0, 2.0, 4.0, 8.0],
             sample_ids=['A'],
             best_dilution=1.0,
             best_concentration=100.0,
@@ -234,7 +234,7 @@ class TestBuildPaiCsv(unittest.TestCase):
         params = SangerParams(
             num_samples=1,
             base_volume=100,
-            dilution_factors=[1.0, 2.0],
+            dilution_factors=[1.0, 2.0, 4.0, 8.0],
             sample_ids=['A'],
             best_dilution=None,
             best_concentration=None,

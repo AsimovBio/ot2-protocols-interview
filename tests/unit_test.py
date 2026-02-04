@@ -71,7 +71,7 @@ class OT2ProtocolsTestCase(unittest.TestCase):
                                     "num_samples": "asdfa"
                                  }),
                                  content_type='application/json')
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 400)
 
     def test_sanger_view(self):
         response = self.app.get("/protocols/sanger")
@@ -110,9 +110,9 @@ class OT2ProtocolsTestCase(unittest.TestCase):
         }
         with patch.dict(os.environ, {
             'GENEWIZ_ENABLED': 'true',
-            'GENEWIZ_API_KEY': 'test-key',
+            'GENEWIZ_API_KEY': 'test-api-key',
             'BENCHLING_ENABLED': 'true',
-            'BENCHLING_API_KEY': 'j6da2A0lpn-4wC01bD'
+            'BENCHLING_API_KEY': 'test-api-key'
         }, clear=False):
             with patch('ot2protocols.sanger.GeneWizClient.place_order') as mock_order, \
                  patch('ot2protocols.sanger.BenchlingClient.fetch_sequence') as benchling_seq:
