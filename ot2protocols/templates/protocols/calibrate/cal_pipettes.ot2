@@ -1,0 +1,18 @@
+import re
+
+def pick_and_drop(pipette, tips):
+    pipette.pick_up_tip(tips.wells(0))
+    pipette.drop_tip(tips.wells(0))
+
+if "tipracks-10ul" in ROBOT_CONFIG["labware"].keys():
+    small_tips = ROBOT_CONFIG["labware"]["tipracks-10ul"][0]
+
+if "tipracks-200ul" in ROBOT_CONFIG["labware"].keys():
+    large_tips = ROBOT_CONFIG["labware"]["tipracks-200ul"][0]
+
+for name, pipette in ROBOT_CONFIG["pipettes"].items():
+    if int(re.sub("[^0-9]", "", name)) > 10:
+        pick_and_drop(pipette, large_tips)
+    else:
+        pick_and_drop(pipette, small_tips)
+

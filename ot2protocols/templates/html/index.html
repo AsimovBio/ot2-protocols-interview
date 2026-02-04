@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+    <body>
+        <h1>Biocorp OT2 Workflow Generator</h1>
+        <p>Generate and download OT2 Workflows</p>
+	<h2>Protocols</h2>
+	{% for i in protocols %}
+	<p><a href="{{ url_for(i.short_name + '.view') }}"><b>{{ i.title }}</b></a> {{ i.description | safe }}</p>
+        {% endfor %}
+	<h2>Other</h2>
+	<p><a href="{{ url_for('labware.view') }}"<b>Create Labware</b></a> Loads all custom labware definitions onto robot.</p>
+	<p><a href="{{ url_for('calibrate.view') }}"<b>Calibrate Labware</b></a> Protocols for calibrating labware items.</p>
+    </body>
+</html>

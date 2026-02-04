@@ -1,0 +1,28 @@
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: ot2protocols
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: ot2protocols
+    spec:
+      containers:
+      - name: ot2protocols
+        image: gcr.io/hosting-infrastructure/ot2protocols:0.1.2
+        ports:
+        - containerPort: 5000
+        resources:
+          limits:
+            memory: 1Gi
+            cpu: 1.0
+          requests:
+            memory: 512Mi
+            cpu: 0.5
+        livenessProbe:
+          httpGet:
+            path: "/health"
+            port: 5000

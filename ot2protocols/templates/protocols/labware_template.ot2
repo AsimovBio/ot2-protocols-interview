@@ -1,0 +1,35 @@
+"""
+Clear and update all custom labware definitions.
+"""
+
+
+from opentrons import robot, labware
+from opentrons.data_storage import database
+
+
+robot.reset()
+
+
+def recreate_labware(name, **kwargs):
+    """Delete and recreate a labware definition."""
+    database.delete_container(name)
+    labware.create(name, **kwargs)
+
+
+recreate_labware(
+    '96-PCR-cold-block',
+    grid=(12, 8),
+    spacing=(9, 9),
+    diameter=5,
+    depth=10.5,
+    volume=300)
+
+
+recreate_labware(
+    'tube-rack-48-PCR-cold-block',
+    grid=(6, 8),
+    spacing=(18, 9),
+    diameter=5,
+    depth=19.5,
+    volume=280)
+

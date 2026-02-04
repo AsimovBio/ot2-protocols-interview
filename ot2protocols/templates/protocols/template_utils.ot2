@@ -1,0 +1,170 @@
+"""
+These are convenience functions that should be written in at the top of the
+output protocol file. These functions should be used in protocols, not
+generator scripts (i.e. they require the opentrons package installed on the robot to run).
+"""
+import re
+
+
+def flashing_pause(flashes=15, freq=2):
+    """Pause the robot indefinitely and flash lights."""
+    i = 0
+    robot.pause()
+    while not (robot._driver.run_flag.is_set()) and i < flashes:
+        robot.turn_on_rail_lights()
+        time.sleep(freq)
+        robot.turn_off_rail_lights()
+        time.sleep(freq)
+
+
+def transfer_water(pipette, vol, source, dest, disposal_vol=None,
+                   new_tip='always', trash=True, touch_tip=False,
+                   blow_out=False, mix_before=(0, 0), mix_after=(0, 0),
+                   air_gap=0):
+    """Execute transfer command w/ different defaults for water."""
+    if disposal_vol is None:
+        disposal_vol = pipette.min_volume
+    pipette.transfer(vol, source, dest, disposal_vol=disposal_vol,
+                     new_tip=new_tip, trash=trash, touch_tip=touch_tip,
+                     blow_out=blow_out, mix_before=mix_before,
+                     mix_after=mix_after, air_gap=air_gap)
+
+
+def transfer_50_glycerol(pipette, vol, source, dest, disposal_vol=None,
+                         new_tip='always', trash=True, touch_tip=False,
+                         blow_out=False, mix_before=(0, 0), mix_after=(0, 0),
+                         air_gap=0):
+    """Execute transfer command with different defaults for glycerol."""
+    if disposal_vol is None:
+        disposal_vol = pipette.min_volume
+    transfer(vol, source, dest, disposal_vol=disposal_vol, new_tip=new_tip,
+             trash=trash, touch_tip=touch_tip, blow_out=blow_out,
+             mix_before=mix_before, mix_after=mix_after, air_gap=air_gap)
+
+
+# def check_config(target_config):
+    # """
+    # Throw an error if the robot is not in a specified configuration.
+
+    # """
+
+
+def find_tips_in_col(col, num_tips):
+    """
+    Find and return  num_tips contiguous wells with tips in col or
+    return False.
+    """
+    wells = []
+    # Iterating in reverse order to move up the column of tiprack to allow
+    # for individual tips to be picked up by multichannel pipette
+    for i in reversed(col):
+        if i.has_tip:
+            wells.append(i)
+        else:
+            wells = []
+        if len(wells) == num_tips:
+            return wells
+    return False
+
+
+def find_tips(pipette, tip_racks, number=None):
+    """
+    Searches for and picks up tips.
+    tip_racks must be a list of tip racks. Each well must have a
+    property has_tip. If the pipette is multichannel, number
+    determines the number of tips picked up.
+    Note: This function does NOT validate tip compatibility and
+    should NOT be used in the same protocol as the built-in
+    pick_up_tip command.
+    Also note that cherry picking with a multichannel can be
+    very dangerous and requires care to avoid collisions with
+    labware surrounding both the tip rack and destination.
+    """
+    if number:
+        if number < 1:
+            raise ValueError("number of tips must be >= 1")
+        elif number > pipette.channels:
+            error_msg = "{0} tips requested for {1}-channel pipette".format(number,
+                                                                            pipette.channels)
+            raise ValueError(error_msg)
+        else:
+            required_channels = number
+    else:
+        required_channels = pipette.channels
+
+    for rack in tip_racks:
+        for col in rack.cols:
+            tip_wells = find_tips_in_col(col, required_channels)
+            if tip_wells:
+                for i in tip_wells:
+                    i.has_tip = False
+                pipette.pick_up_tip(tip_wells[-1])
+                return tip_wells[0]
+
+    raise ValueError('No tips found.')
+
+
+def add_tips(container, number=None):
+    """
+    Assign new property has_tip to True for each well in container
+    If number is set, only the first number tips will be set to True.
+    """
+    if number is None:
+        number = len(list(container.wells()))
+    for i, well in enumerate(container.wells()):
+        if i < number:
+            well.has_tip = True
+        else:
+            well.has_tip = False
+    return container
+
+
+def calibrate_labware(labware_name, include_temp_deck=False,
+                      include_mag_deck=False):
+    """A convenience function for calibrating labware.
+
+    This function makes a variety of assumptions including:
+    - The robot config has a 50 ul pipette.
+    - The robot config includes 200 ul tips.
+    """
+    pipette = ROBOT_CONFIG["pipettes"]["P50_Multi"]
+
+    calibrate_slots = available_slots
+
+    def include_module(module_name):
+        td_slot_name = str(ROBOT_CONFIG["modules"][module_name].labware.parent)
+        # e.g. "<Deck><Slot 5>" -> "5"
+        td_slot = re.sub("[^0-9]", "", td_slot_name.split("><")[-1][:-1])
+        calibrate_slots.append(td_slot)
+
+    if include_temp_deck:
+        include_module("temp_deck")
+    if include_mag_deck:
+        include_module("mag_deck")
+
+    labware_items = []
+    for i in calibrate_slots:
+        labware_items.append(labware.load(labware_name, i, share=True))
+    
+    tips = ROBOT_CONFIG["labware"]["tipracks-200ul"][0]
+
+    pipette.pick_up_tip(tips.wells(0))
+
+    # Dummy labware usage so OT2 calibrates it.
+    for i in labware_items:
+        pipette.transfer(0, i.wells(0), i.wells(0), new_tip='never')
+
+    pipette.drop_tip(tips.wells(0))
+
+
+def pick_up_current(pipette, current):
+    """
+    Assigns pipette head new pick_up_current value and can check the current
+    via pipette._pick_up_current (assuming pipette is an instruments instance)
+    """
+    if current < 0.05:
+        raise ValueError("current must be >= 0.05 amps")
+    elif current > 2:
+        raise ValueError("current must be <= 2 amps")
+    else:
+        pipette.set_pick_up_current(current)

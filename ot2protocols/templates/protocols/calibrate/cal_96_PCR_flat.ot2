@@ -1,0 +1,2 @@
+calibrate_labware("96-PCR-flat", include_temp_deck=True)
+

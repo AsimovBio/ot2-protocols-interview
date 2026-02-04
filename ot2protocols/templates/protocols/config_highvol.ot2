@@ -1,0 +1,22 @@
+"""
+Configure the robot in the highvol configuration, storing the created
+labware, pipettes, and modules in a dictionary. Also set the
+available_slots variable to the slots available for protocol-specific
+labware.
+"""
+
+ROBOT_CONFIG = {
+    "pipettes": {},
+    "modules": {},
+    "labware": {}
+}
+
+ROBOT_CONFIG["pipettes"]["P50_Multi"] = instruments.P50_Multi(mount="left")
+ROBOT_CONFIG["pipettes"]["P300_Multi"] = instruments.P300_Multi(mount="right")
+ROBOT_CONFIG["modules"]["temp_deck"] = modules.load("tempdeck", "10")
+ROBOT_CONFIG["modules"]["mag_deck"] = modules.load("magdeck", "7")
+ROBOT_CONFIG["labware"]["tipracks-200ul"] = [labware.load("tiprack-200ul", "8"),
+                                             labware.load("tiprack-200ul", "9")]
+
+available_slots = ["1", "2", "3", "4", "5", "6", "11"]
+

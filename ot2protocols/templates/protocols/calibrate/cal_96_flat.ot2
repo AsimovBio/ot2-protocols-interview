@@ -1,0 +1,2 @@
+calibrate_labware("96-flat", include_temp_deck=True)
+

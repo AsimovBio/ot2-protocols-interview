@@ -1,0 +1,37 @@
+version: 2.1
+jobs:
+  test:
+    docker:
+      - image: circleci/python:3.6.8
+    working_directory: ~/ot2protocols_package
+    steps:
+      - checkout
+      - run:
+          command: sudo pip3 install tox && sudo python3 -m tox
+      - store_artifacts:
+          path: .coverage
+      - store_test_results:
+          path: test-results
+  push:
+    docker:
+      - image: docker:18.06.3-ce-git
+    working_directory: ~/ot2protocols_package
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run: echo $GCLOUD_SERVICE_KEY | docker login -u _json_key --password-stdin https://gcr.io
+      - run: docker build -t gcr.io/hosting-infrastructure/ot2protocols:$CIRCLE_SHA1 .
+      - run: docker push gcr.io/hosting-infrastructure/ot2protocols:$CIRCLE_SHA1
+
+workflows:
+  version: 2
+  build_test_deploy: 
+    jobs:
+      - test
+      - push:
+          context: asimov-gcr
+          filters:
+            branches:
+              only: master
+          requires:
+            - test

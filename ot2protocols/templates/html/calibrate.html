@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+    <body>
+        <h1>Calibrate Labware</h1>
+        <h2>Description</h2>
+        <p>Download and run all calibration protocols corresponding to the desired robot configuration.</p>
+        {% from "html/_form_helpers.html" import render_field %}
+        {% for i in calibrations %}
+            <h3>{{i.name}}</h3>
+            <form method="POST" action="{{ i.form_action }}">
+		<input type="hidden" name="config_name" value="{{ i.config_name }}" />
+		<input type="hidden" name="item_name" value="{{ i.item_name }}" />
+                <button class="btn btn-lg btn-primary btn-block" type="submit">Download Protocol</button>
+            </form>
+        {% endfor %}
+        </form>
+    </body>
+</html>

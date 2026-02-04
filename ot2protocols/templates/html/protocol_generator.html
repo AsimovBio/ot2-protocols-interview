@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+    <body>
+        <h1>{{ title }} Generator</h1>
+        <h2>Description</h2>
+        <p>{{ description | safe }}</p>
+        <h2>Instructions</h2>
+        <p>{{ instructions | safe }}</p>
+        {% from "html/_form_helpers.html" import render_field %}
+        <form method="POST" action="{{ form_action }}">
+            {% if input_fields %}
+                <h2>Protocol Parameters</h2>
+                <dl>
+                {% for i in input_fields %}
+                    {{ render_field(i) }}
+                {% endfor %}
+                </dl>
+            {% endif %}
+            <p></p>
+            <button class="btn btn-lg btn-primary btn-block" type="submit">Download Protocol</button>
+        </form>
+    </body>
+</html>

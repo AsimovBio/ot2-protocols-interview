@@ -1,0 +1,13 @@
+pipette = ROBOT_CONFIG["pipettes"]["P10_Multi"]
+
+labware_items = ROBOT_CONFIG["labware"]["tipracks-10ul"]
+calibrate_slots = available_slots
+
+for i in calibrate_slots:
+    labware_items.append(labware.load("tiprack-10ul", i))
+
+# Dummy labware usage so OT2 calibrates it.
+for i in labware_items:
+    pipette.pick_up_tip(i.wells(0))
+    pipette.drop_tip(i.wells(0))
+

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ot2protocols
+  labels:
+    category: tools
+  annotations:
+    getambassador.io/config: |
+      ---
+      apiVersion: ambassador/v1
+      kind: Mapping
+      name: ot2protocols
+      prefix: /
+      service: ot2protocols.default.svc.cluster.local.:5000
+      host: ot2.biocorp.io
+spec:
+  ports:
+  - protocol: TCP
+    port: 5000
+  selector:
+    app: ot2protocols

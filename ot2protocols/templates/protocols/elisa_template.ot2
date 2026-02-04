@@ -1,0 +1,129 @@
+"""
+Run ELISA protocol. Requires template utils and highvol config.
+"""
+
+
+def add(vol, source):
+    """Add a sample to the assay plate."""
+    cols = [i[0].top() for i in assay_plate.cols]
+    cols.reverse()
+    p300.transfer(vol, source.bottom(), cols, new_tip='never', blow_out=True)
+
+
+def remove(vol):
+    """Remove vol from the assay plate and discard."""
+    cols = [i[0].bottom() for i in assay_plate.cols]
+    cols.reverse()
+    p300.transfer(vol, cols, robot.fixed_trash, new_tip='never')
+
+
+def tip():
+    p300.drop_tip()
+    find_tips(p300, tip_racks, number=(num_samples + 1))
+
+
+def wash():
+    for n in range(0, 3):
+        add(200, bsa_1)
+        p300.delay(minutes=5)
+        remove(200)
+        tip()
+
+
+num_samples = parameters["num_samples"]
+
+tip_racks = ROBOT_CONFIG["labware"]["tipracks-200ul"]
+tip_racks.append(labware.load("tiprack-200ul", available_slots.pop()))
+for i in tip_racks:
+    add_tips(i)
+
+p300 = ROBOT_CONFIG["pipettes"]["P300_Multi"]
+p50 = ROBOT_CONFIG["pipettes"]["P50_Multi"]
+
+td = ROBOT_CONFIG["modules"]["temp_deck"]
+
+assay_plate = labware.load('96-flat', available_slots.pop(), 'Sample Plate', share=True)
+
+sample_tubes = labware.load('tube-rack-48-PCR-cold-block', available_slots.pop(), 'Sample tubes in cold rack')
+
+buffers = labware.load('trough-12row', available_slots.pop(), 'ELISA Buffers')
+bsa_1 = buffers.wells(0)
+bsa_3 = buffers.wells(1)
+sigma_mab = buffers.wells(2)
+sec_anti = buffers.wells(3)
+aps = buffers.wells(4)
+naoh = buffers.wells(5)
+
+find_tips(p300, tip_racks, number=(num_samples + 1))
+
+# Sample plate must already be incubated over night at 4C w/ capture antibody.
+
+# Do all steps at 37C
+td.set_temperature(37)
+
+# Wash plate 3x w/ 200 ul 1% BSA in PBS for 5 min each.
+wash()
+
+# Add 200 ul 3% BSA and incubate 1 hr @ 37C.
+add(200, bsa_3)
+p300.delay(minutes=60)
+remove(200)
+tip()
+
+# Wash plate 3x w/ 200 ul 1% BSA in PBS for 5 min.
+wash()
+
+# Add 100 ul 3% BSA to all columns except first.
+cols = [i[0].top() for i in assay_plate.cols[1:12]]
+cols.reverse()
+p300.transfer(100, bsa_3.bottom(), cols, new_tip='never', blow_out=True)
+tip()
+
+# Add 200 ul of 1000 ng/mL Sigma mAB and samples to first column.
+# It's possible this needs to be prepared fresh.
+p300.transfer(200, sample_tubes.wells(0).bottom(), assay_plate.wells(0).bottom(), new_tip='never')
+tip()
+
+# Serially dilute standard into remaining columns except last,
+# transfering 100 ul to each (except the last which gets none).
+source_cols = [i[0].bottom() for i in assay_plate.cols[0:10]]
+dest_cols = [i[0].bottom() for i in assay_plate.cols[1:11]]
+for i, well in enumerate(source_cols):
+    p300.transfer(100, well, dest_cols[i], new_tip='never', mix_after=(3, 150))
+    tip()
+
+# Incubate 1 hr @ 37C.
+p300.delay(minutes=60)
+remove(200)
+
+# Wash plate 3x w/ 200 ul 1% BSA in PBS for 5 min each.
+wash()
+
+# Add 100 ul of secondary antibody solution (may need to be made fresh).
+add(100, sec_anti)
+tip()
+
+# Incubate 1 hr @ 37C.
+p300.delay(minutes=60)
+remove(100)
+
+# Wash plate 3x w/ 200 ul 1% BSA in PBS for 5 min each.
+wash()
+
+# Add 100 ul APS substrate.
+add(100, aps)
+tip()
+
+# Incubate @ 22C for 30 min (may need to be in dark).
+td.set_temperature(22)
+p300.delay(minutes=30)
+
+# Add 25 uL 3 M NaOH.
+cols = [i[0].bottom() for i in assay_plate.cols]
+find_tips(p50, tip_racks, number=(num_samples + 1))
+p50.transfer(100, naoh.bottom(), cols, new_tip='never', blow_out=True)
+p50.drop_tip()
+
+# Finished, incubate at 4C
+td.set_temperature(4)
+

@@ -1,0 +1,17 @@
+"""
+This protocol was dynamically generated from the Biocorp OT2 Workflows app.
+"""
+
+from opentrons import robot, modules, instruments, labware
+
+{% if include_utils %}
+{% include 'protocols/template_utils.ot2' %}
+{% endif %}
+
+parameters = {{ parameter_str }}
+
+{% if robot_config %}
+{% include robot_config %}
+{% endif %}
+
+{% include protocol_template %}
