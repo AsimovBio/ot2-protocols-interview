@@ -1,3 +1,5 @@
+**NOTE: THIS IS A PUBLIC REPO**
+
 # OT2 Workflows
 
 This is a Flask app that serves Biocorp's OT2 workflows, which are generated from input parameters. The app has both an extremely basic web GUI and a JSON-based API. We may want to turn this into an actual REST api with persistent resources for stored protocols etc. later.
