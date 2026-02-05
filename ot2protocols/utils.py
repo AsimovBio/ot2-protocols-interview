@@ -27,6 +27,7 @@ def protocol_from_template(parameters, protocol_template, robot_config=None,
 
     return render_template('protocols/generic_protocol.ot2',
                            parameter_str=parameter_str,
+                           parameters=parameters,
                            protocol_template=protocol_template,
                            robot_config=robot_config,
                            include_utils=include_utils)

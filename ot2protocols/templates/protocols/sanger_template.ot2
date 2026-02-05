@@ -1,0 +1,136 @@
+"""Serial dilution + NanoDrop preparation for sequencing.
+
+This protocol:
+1. Creates a series of serial dilutions for each sample
+2. Pauses for NanoDrop concentration measurement
+3. Transfers the selected dilution to output strip tubes
+
+Parameters:
+  - num_samples: Number of samples (1-12)
+  - base_volume: Volume per well in dilution series (µL)
+  - dilution_factors: Factors for dilution series (e.g., [1, 2, 4, 8])
+  - sample_ids: List of sample identifiers
+  - best_dilution: Selected dilution factor (if filled in)
+  - best_concentration: NanoDrop concentration result (ng/µL)
+"""
+
+from opentrons import instruments, labware, robot
+
+parameters = {{ parameter_str }}
+
+{% if robot_config %}
+{% include robot_config %}
+{% endif %}
+
+p300 = ROBOT_CONFIG['pipettes']['P300_Multi']
+# Shared diluent well is used to make each dilution.
+diluent_trough = labware.load('trough-12row', available_slots.pop(), 'Diluent Reservoir')
+diluent_well = diluent_trough.wells(0)
+
+sample_rack = labware.load('tube-rack-48-PCR-cold-block', available_slots.pop(), 'Source Tubes')
+dilution_plate = labware.load('96-flat', available_slots.pop(), 'Sanger Dilutions', share=True)
+{% if parameters['best_dilution'] %}
+output_strips = labware.load('8-well-strip', available_slots.pop(), 'Output Strips')
+{% endif %}
+
+
+def prepare_column(sample_well, column_wells, factors, final_volume):
+    """Apply a stack of dilutions to the indicated column.
+
+    Args:
+        sample_well: Source well with original sample
+        column_wells: List of destination wells (one per dilution factor)
+        factors: Dilution factors (e.g., [1, 2, 4, 8])
+        final_volume: Target volume per well
+    """
+    for tier_index, factor in enumerate(factors):
+        dest = column_wells[tier_index]
+        sample_volume = final_volume / factor
+        diluent_volume = max(final_volume - sample_volume, 0)
+
+        # Add diluent first if needed
+        if diluent_volume > 0:
+            p300.transfer(
+                diluent_volume,
+                diluent_well.bottom(),
+                dest.bottom(),
+                new_tip='always',
+            )
+
+        # Add sample with mixing
+        p300.transfer(
+            sample_volume,
+            sample_well.bottom(),
+            dest.bottom(),
+            new_tip='always',
+            mix_after=(3, min(sample_volume / 2, 20))
+        )
+        robot.comment(f'Row {tier_index + 1} diluted at 1:{factor} ({dest})')
+
+
+# ============================================================================
+# PHASE 1: Create serial dilution series
+# ============================================================================
+robot.comment('Starting serial dilution series for {0} samples'.format(parameters['num_samples']))
+
+columns = dilution_plate.columns()[:parameters['num_samples']]
+for idx, column in enumerate(columns):
+    sample = sample_rack.wells(idx)
+    robot.comment('Preparing dilution series for sample {0}'.format(idx + 1))
+    prepare_column(
+        sample,
+        column[:len(parameters['dilution_factors'])],
+        parameters['dilution_factors'],
+        parameters['base_volume'],
+    )
+
+# ============================================================================
+# PHASE 2: Pause for NanoDrop measurement
+# ============================================================================
+robot.comment(
+    'Pause after the dilution series and record the NanoDrop value for the concentration that measures ≥100 ng/µL.'
+)
+robot.pause()
+
+{% if parameters['best_dilution'] %}
+# ============================================================================
+# PHASE 3: Transfer winning dilution to output strips
+# ============================================================================
+robot.comment(
+    'Selected dilution factor {0} with NanoDrop {1} ng/µL. Transferring 10 µL to output strips.'.format(
+        parameters['best_dilution'],
+        parameters['best_concentration']
+    )
+)
+
+# Find the row index for the selected dilution factor
+best_dilution_row = parameters['dilution_factors'].index(parameters['best_dilution'])
+
+robot.comment('Transferring 10 µL from dilution {0} (1:{1}) to output strips'.format(
+    best_dilution_row + 1,
+    int(parameters['best_dilution']) if parameters['best_dilution'] == int(parameters['best_dilution']) else parameters['best_dilution']
+))
+
+# Transfer 10 µL from each sample's dilution to the output strips
+for idx, column in enumerate(columns):
+    source_well = column[best_dilution_row]
+    dest_well = output_strips.wells(idx)
+    p300.transfer(
+        10,
+        source_well.bottom(),
+        dest_well.bottom(),
+        new_tip='always',
+        mix_after=(3, 5)
+    )
+    robot.comment('Transferred 10 µL from sample {0} to output strip well {1}.'.format(idx + 1, idx + 1))
+
+robot.comment('Sanger sequencing preparation complete!')
+
+{% else %}
+# ============================================================================
+# PHASE 2 COMPLETE: Awaiting NanoDrop Results
+# ============================================================================
+robot.comment(
+    'Dilution complete. After NanoDrop results are available, download the protocol again and fill in the selected dilution factor and concentration to proceed with the transfer.'
+)
+{% endif %}
